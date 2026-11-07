@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdlib>
 #include <thread>
 
 #include "common/logging.h"
@@ -404,10 +405,22 @@ bool PresentManager::PaceFrame(Frame* frame, std::stop_token token) {
     using Clock = std::chrono::steady_clock;
     pacer.NoteQueued(frame->queued_at);
     const VkPresentModeKHR mode = swapchain.PresentMode();
+    // Leshu: pace generated frames too (EDEN_NX2_FG_PACE=0 turns it off). Without it a generated
+    // frame was presented right before its real one: at 30 FPS x2 on a 180 Hz display one showed
+    // for one refresh and the other for five, so 60 frames a second still moved like 30. Paced,
+    // ~89% show for exactly three refreshes.
+    static const bool fg_pace = [] {
+        const char* const value = std::getenv("EDEN_NX2_FG_PACE");
+        return value == nullptr || value[0] != '0';
+    }();
+    const bool frame_gen_on = Settings::values.frame_gen.GetValue();
+    const bool pace_generated = frame_gen_on && fg_pace;
+    pacer.SetFramesPerGuestFrame(
+        pace_generated ? Settings::values.frame_gen_multiplier.GetValue() : 1);
     const bool allowed =
         (mode == VK_PRESENT_MODE_FIFO_KHR || mode == VK_PRESENT_MODE_MAILBOX_KHR ||
          mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR) &&
-        !Settings::values.frame_gen.GetValue() && Settings::values.use_speed_limit.GetValue() &&
+        (!frame_gen_on || pace_generated) && Settings::values.use_speed_limit.GetValue() &&
         Settings::values.current_speed_mode.GetValue() != Settings::SpeedMode::Turbo;
     pacer.Refresh(Clock::now(), allowed);
     if (const u64 want = pacer.Outstanding(); pacer.Pacing() && want != 0) {
@@ -436,8 +449,9 @@ bool PresentManager::PaceFrame(Frame* frame, std::stop_token token) {
     // getting a frame for the next one, so every frame arrived right after the last was shown
     // and waited a whole frame (~30 ms of input lag). The game's pacing lines its frames up with
     // the refreshes instead (g_host_phase_ns).
-    if (VideoCommon::Nx2Perf::g_guest_frame_interval_ns.load(std::memory_order_relaxed) >=
-        25'000'000) {
+    if (!pace_generated &&
+        VideoCommon::Nx2Perf::g_guest_frame_interval_ns.load(std::memory_order_relaxed) >=
+            25'000'000) {
         VideoCommon::Nx2Perf::g_host_phase_ns.store(pacer.NsToNextRefresh(start),
                                                     std::memory_order_relaxed);
         // Only a short hold, for a frame that would be shown a refresh early (after a late

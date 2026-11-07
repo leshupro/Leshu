@@ -96,7 +96,8 @@ HostPacer::Clock::time_point HostPacer::Target(Clock::time_point now) {
     // the slower rate (a loading screen's 25 ms frames held Ocarina at 40 fps). Unknown: only
     // one frame per refresh.
     const long long guest_ns =
-        VideoCommon::Nx2Perf::g_guest_frame_interval_ns.load(std::memory_order_relaxed);
+        VideoCommon::Nx2Perf::g_guest_frame_interval_ns.load(std::memory_order_relaxed) /
+        frames_per_guest;
     const s64 k =
         guest_ns > 0
             ? (std::max<s64>)(1, static_cast<s64>(std::floor(guest_ns / refresh_ns + 0.02)))

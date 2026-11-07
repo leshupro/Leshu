@@ -30,6 +30,11 @@ public:
 
     /// A frame reached the present thread (for the game's frame period).
     void NoteQueued(Clock::time_point queued);
+    /// Frames shown per game frame: 1, or the frame generation multiplier when generated frames
+    /// are paced too (EDEN_NX2_FG_PACE).
+    void SetFramesPerGuestFrame(u32 frames) {
+        frames_per_guest = frames == 0 ? 1 : frames;
+    }
 
     /// Whether frames are held now (switch, refresh period known).
     [[nodiscard]] bool Pacing() const {
@@ -79,6 +84,7 @@ private:
 
     std::optional<Clock::time_point> last_queued;
     double content_ns{1e9 / 60.0};
+    u32 frames_per_guest{1};
 
     std::optional<Clock::time_point> vblank; // refresh the last shown frame appeared at
     std::optional<Clock::time_point> last_shown;
