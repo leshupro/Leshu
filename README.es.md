@@ -14,6 +14,12 @@
 
 > Todo el mérito del emulador es de sus autores (ver **Créditos**). Leshu solo lo compila, lo mide y lo ajusta.
 
+## Novedades
+
+- **Leshu 3**: Leshu 2 más arreglos que publicaron los autores el 7-11-2026: el modo 30 FPS de baja latencia de Frizti (a 30 FPS los fotogramas ya no esperan ~30 ms antes de mostrarse: un fotograma menos de retraso en los controles) y tres arreglos de zortos293/Lichii (un cierre en Windows al liberar páginas de la tabla de páginas, estadísticas de depuración de la caché de texturas que crecían toda la sesión y búferes reunidos que no se liberaban). Misma velocidad que Leshu 2 en nuestras pruebas; el modo 30 FPS se mantiene en 30,0 en `lichii.exe`.
+- **Leshu 2**: perfil PGO grabado jugando (Dock, caminando): +7-11% caminando frente a Leshu 1.
+- **Leshu 1**: primera versión (Frizti v3 + clang ThinLTO PGO).
+
 ## Resultados
 
 Modo Dock, 1080p, i7-11700F + RTX 3060, FPS medio durante 96 s después de cargar la partida.
@@ -39,7 +45,7 @@ Las versiones oficiales de Frizti v3 ya usan clang + PGO (con su propio perfil),
 ## Instalación (Windows)
 
 1. Instala el [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) si no lo tienes.
-2. Descarga `Leshu-2-Windows-x64.zip` de [Releases](https://github.com/leshupro/Leshu/releases) y extrae la carpeta completa.
+2. Descarga `Leshu-3-Windows-x64.zip` de [Releases](https://github.com/leshupro/Leshu/releases) y extrae la carpeta completa.
 3. Pon tus propios `prod.keys` y `title.keys` en `user/keys/` e instala el firmware sacado de tu propia consola (Herramientas → Instalar firmware).
 4. Abre **lichii.exe**, añade la carpeta de tus juegos y a jugar.
 

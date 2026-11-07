@@ -14,6 +14,12 @@
 
 > All credit for the emulator goes to its authors (see **Credits**). Leshu only builds, measures and tunes it.
 
+## What's new
+
+- **Leshu 3**: Leshu 2 plus fixes the authors published on 2026-11-07: Frizti's low-latency 30 FPS mode (frames no longer wait ~30 ms before being shown at 30 FPS: about one frame less input lag) and three zortos293/Lichii fixes (a Windows crash when page-table pages were decommitted, texture cache debug statistics that grew for the whole session, gathered buffers not released). Same speed as Leshu 2 in our runs; 30 FPS mode holds 30.0 in `lichii.exe`.
+- **Leshu 2**: PGO profile trained on gameplay (Docked, walking): +7-11% while walking vs Leshu 1.
+- **Leshu 1**: first build (Frizti v3 + clang ThinLTO PGO).
+
 ## Results
 
 Docked mode, 1080p, i7-11700F + RTX 3060, mean FPS over 96 s after the save loads.
@@ -39,7 +45,7 @@ The official Frizti v3 builds already use clang + PGO (with their own profile), 
 ## Install (Windows)
 
 1. Install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you don't have it.
-2. Download `Leshu-2-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
+2. Download `Leshu-3-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
 3. Put your own `prod.keys` and `title.keys` in `user/keys/` and install the firmware dumped from your own console (Tools → Install Firmware).
 4. Run **lichii.exe**, add your game folder and play.
 
