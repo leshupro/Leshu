@@ -8,7 +8,7 @@
 
 **Leshu** is a performance build of [Lichii Frizti](https://github.com/Frizti/Lichii), the Switch 2 emulator fork tuned for *The Legend of Zelda: Ocarina of Time*. It does not change what the emulator emulates. It is the same code as Frizti v3, built differently:
 
-- **clang-cl + ThinLTO + PGO** (Profile-Guided Optimization trained on Ocarina of Time in six areas).
+- **clang-cl + ThinLTO + PGO** (Profile-Guided Optimization trained on Ocarina of Time). Leshu 2's profile is trained the way people play: Docked 1080p, with Link walking and turning the camera, in six situations.
 - **Generic x86-64-v3 build**: runs on any CPU with AVX2 (Intel 4th gen / Haswell or newer, any AMD Ryzen).
 - **Ready to play**: Frizti v3's tuned defaults for Ocarina of Time are built in. Add your keys and firmware, open the game.
 
@@ -16,19 +16,30 @@
 
 ## Results
 
-Docked mode, 1080p, i7-11700F + RTX 3060, Link standing still, mean FPS over 96 s after the save loads.
+Docked mode, 1080p, i7-11700F + RTX 3060, mean FPS over 96 s after the save loads.
 
-| Area | Frizti v3 (official build) | **Leshu 1** |
+**Leshu 2 vs Leshu 1** (`eden-cli`, two runs each; "walking" = Link walks a square and turns the camera):
+
+| Area | Leshu 1 | **Leshu 2** |
+|---|---|---|
+| Kokiri Village, standing | 33.6 | **34.2** |
+| Kokiri Village, walking | 39.9 | **42.9 (+7%)** |
+| Hyrule Field, standing | 40.1 | 39.9 |
+| Hyrule Field, walking | 37.1 | **41.3 (+11%)** |
+
+**Leshu 1 vs the official Frizti v3 build** (`lichii.exe`, Link standing still):
+
+| Area | Frizti v3 (official build) | Leshu 1 |
 |---|---|---|
 | Kokiri Village | 34.1 | **35.3 (+3.5%)** |
 | Hyrule Field | 43.3 | **43.9 (+1%)** |
 
-Village: mean of two runs each; Hyrule: one run each. The gain is small because the official Frizti v3 builds already use clang + PGO (with their own profile); Leshu's profile is trained on Ocarina of Time only. Bigger gains need code changes: that is the plan for Leshu 2.
+The official Frizti v3 builds already use clang + PGO (with their own profile), so a build alone gains little while standing; Leshu's profiles are trained on Ocarina of Time only, and Leshu 2's on gameplay. Walking FPS swings a lot with where the camera looks (18-58 FPS within one Hyrule run), so treat those means as approximate.
 
 ## Install (Windows)
 
 1. Install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you don't have it.
-2. Download `Leshu-1-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
+2. Download `Leshu-2-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
 3. Put your own `prod.keys` and `title.keys` in `user/keys/` and install the firmware dumped from your own console (Tools → Install Firmware).
 4. Run **lichii.exe**, add your game folder and play.
 
@@ -42,7 +53,7 @@ Nothing has to be set. `nx2_switches.txt` next to the executable lists the GPU s
 
 ## What was measured and did not help
 
-Within ±1 FPS on this PC: GPU fence "Immediate", CPU accuracy "Unsafe", DLSS replacement, disabling post-processing, VSync off, 8 vs 12 GB memory layout, most `EDEN_NX2_PERF_ON` experiments, and skipping the compute-to-graphics and wait-for-idle barriers Frizti v3 added (#295).
+Within ±1 FPS on this PC: GPU fence "Immediate", CPU accuracy "Unsafe", DLSS replacement, disabling post-processing, VSync off, 8 vs 12 GB memory layout, most `EDEN_NX2_PERF_ON` experiments, skipping the compute-to-graphics and wait-for-idle barriers Frizti v3 added (#295), VSync mode and the scaling filter (Docked Hyrule). `EDEN_NX2_INDIRECT_GRID=1` (GPU-sized dispatches) was +10% standing in the village but slower and flickering while walking, so it stays off as Frizti left it.
 
 Handheld (720p) is ~5 FPS faster than Docked (1080p) in Hyrule Field, where the GPU is ~80% busy. In small areas the CPU side is the limit and both modes perform the same.
 
@@ -51,8 +62,8 @@ Handheld (720p) is ~5 FPS faster than Docked (1080p) in Hyrule Field, where the 
 Requirements: Visual Studio 2022/2026 with "Desktop development with C++", the C++ Clang tools and CMake tools components, and the Vulkan SDK.
 
 ```bat
-:: Optimized build with the profile (download leshu-pgo-profile.zip from Releases to pgo\v3.profdata)
-leshu\scripts\configure_leshu.bat use
+:: Optimized build with the profile (download leshu2-pgo-profile.zip from Releases to pgo\l2.profdata)
+leshu\scripts\configure_leshu.bat use l2.profdata
 leshu\scripts\build_dir.bat build-leshu
 ```
 

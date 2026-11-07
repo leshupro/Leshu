@@ -5,6 +5,7 @@ call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\v
 set "VULKAN_SDK=C:\VulkanSDK\1.4.363.0"
 set "PATH=%VULKAN_SDK%\Bin;%PATH%"
 set "LLVM=C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/Llvm/x64"
+if "%2"=="" (set "PROFILE=v3.profdata") else (set "PROFILE=%2")
 set "BASEFLAGS=/O2 /DNDEBUG /Z7 /DNOMINMAX -march=x86-64-v3 /D_USE_STD_VECTOR_ALGORITHMS=0"
 if "%1"=="gen" (
   set "DIR=build-leshugen"
@@ -13,7 +14,7 @@ if "%1"=="gen" (
   set "LTO=OFF"
 ) else (
   set "DIR=build-leshu"
-  set "EXTRA=-fprofile-instr-use=D:/lichii/pgo/v3.profdata -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin"
+  set "EXTRA=-fprofile-instr-use=D:/lichii/pgo/%PROFILE% -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin"
   set "LINKEXTRA="
   set "LTO=ON"
 )
