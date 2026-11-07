@@ -1,0 +1,697 @@
+From f93255eec9c74fb1ac5671e3f63cdd3b2d6375c9 Mon Sep 17 00:00:00 2001
+From: local <local@localhost>
+Date: Fri, 6 Nov 2026 06:41:36 -0600
+Subject: [PATCH 2/2] Experiments: acquire diagnostics (EDEN_NX2_ACQ_DIAG) and
+ front QMD mirror (EDEN_NX2_QMD_TRACK)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/video_core/engines/kepler_compute.cpp |  30 ++-
+ src/video_core/engines/maxwell_3d.cpp     |   9 +
+ src/video_core/engines/maxwell_dma.cpp    |   6 +
+ src/video_core/engines/puller.cpp         |  41 ++-
+ src/video_core/gpu_split.cpp              |   4 +
+ src/video_core/nx2_acq_diag.h             | 137 ++++++++++
+ src/video_core/nx2_qmd_front.h            | 299 ++++++++++++++++++++++
+ 7 files changed, 523 insertions(+), 3 deletions(-)
+ create mode 100644 src/video_core/nx2_acq_diag.h
+ create mode 100644 src/video_core/nx2_qmd_front.h
+
+diff --git a/src/video_core/engines/kepler_compute.cpp b/src/video_core/engines/kepler_compute.cpp
+index 07e6a48..b2ace71 100644
+--- a/src/video_core/engines/kepler_compute.cpp
++++ b/src/video_core/engines/kepler_compute.cpp
+@@ -25,6 +25,8 @@
+ #include "video_core/fire_emblem_upscale.h"
+ #include "video_core/nx2_profile.h"
+ #include "video_core/nx2.h"
++#include "video_core/nx2_acq_diag.h"
++#include "video_core/nx2_qmd_front.h"
+ #include "video_core/engines/fermi_2d.h"
+ #include "video_core/engines/kepler_compute.h"
+ #include "video_core/engines/maxwell_3d.h"
+@@ -389,6 +391,14 @@ bool KeplerCompute::ProcessNativeMethod(Core::System& system, u32 method, u32 ar
+             },
+             [&](u64 address, u32 payload, u32 flags) {
+                 if (!memory_manager.IsFullyMappedRange(address, sizeof(payload))) return false;
++                if (VideoCommon::Nx2AcqDiag::Enabled()) {
++                    if (const auto device = memory_manager.GpuToCpuAddress(address)) {
++                        VideoCommon::Nx2AcqDiag::NoteSource(
++                            *device, (flags & (1U << 26))   ? VideoCommon::Nx2AcqDiag::SrcQmdAdd
++                                     : (flags & (1U << 19)) ? VideoCommon::Nx2AcqDiag::SrcQmdMax
++                                                            : VideoCommon::Nx2AcqDiag::SrcQmdPlain);
++                    }
++                }
+                 if (flags & (1U << 26)) {
+                     rasterizer->SignalFence([this, address, payload] {
+                         const u32 value = memory_manager.Read<u32>(address) + payload;
+@@ -1184,12 +1194,27 @@ void KeplerCompute::FrontApply(FrontState& fs, u32 method, u32 argument) {
+             const GPUVAddr address =
+                 ((GPUVAddr{fs.registers[0xc6]} << 32) | fs.registers[0xc7]) << 8;
+             const u32 control = fs.registers[0xa7];
+-            if (memory_manager.IsFullyMappedRange(address, 256) &&
+-                ((control & (1U << 24)) || !(fs.registers[0xcc] & (1U << 12)))) {
++            const bool mapped = memory_manager.IsFullyMappedRange(address, 256);
++            if (mapped && VideoCommon::Nx2QmdFront::Mode() != 0) {
++                VideoCommon::Nx2QmdFront::Mirror::Get().InlineWrite(address, &fs.registers[0xc8]);
++            }
++            if (mapped && ((control & (1U << 24)) || !(fs.registers[0xcc] & (1U << 12)))) {
+                 fs.registers[0xb0] = 3;
++                if (VideoCommon::Nx2QmdFront::Mode() != 0) {
++                    VideoCommon::Nx2QmdFront::Mirror::Get().Signal(memory_manager, address, 3);
++                }
+             }
+         }
+         break;
++    case 0xaf:
++    case 0xb0:
++        // The PCAS signals ProcessNativeMethod hands to NativeQmdScheduler::Signal.
++        if (VideoCommon::Nx2QmdFront::Mode() != 0 &&
++            ((method == 0xaf && (argument & 2)) || (method == 0xb0 && (argument & 15) > 1))) {
++            VideoCommon::Nx2QmdFront::Mirror::Get().Signal(
++                memory_manager, GPUVAddr{fs.registers[0xad]} << 8, argument);
++        }
++        break;
+     case 0x45:
+         FrontMacroEngine(fs).ClearCode(argument);
+         break;
+@@ -1271,6 +1296,7 @@ void KeplerCompute::FrontNoteRelease(VideoCommon::GpuSplit& split, const FrontSt
+         (GPUVAddr{fs.registers[0x6c0] & 0x1ffffff} << 32) | fs.registers[0x6c1];
+     if (const auto device = memory_manager.GpuToCpuAddress(address)) {
+         split.NoteRelease(*device, address, fs.registers[0x6c2]);
++        VideoCommon::Nx2AcqDiag::NoteSource(*device, VideoCommon::Nx2AcqDiag::SrcComputeReport);
+     }
+ }
+ 
+diff --git a/src/video_core/engines/maxwell_3d.cpp b/src/video_core/engines/maxwell_3d.cpp
+index b770ccf..44e0d41 100644
+--- a/src/video_core/engines/maxwell_3d.cpp
++++ b/src/video_core/engines/maxwell_3d.cpp
+@@ -24,6 +24,7 @@
+ #include "video_core/gpu_split.h"
+ #include "video_core/memory_manager.h"
+ #include "video_core/nx2.h"
++#include "video_core/nx2_acq_diag.h"
+ #include "video_core/nx2_cmdpage_diag.h"
+ #include "video_core/nx2_perf.h"
+ #include "video_core/nx2_profile.h"
+@@ -1304,6 +1305,14 @@ void Maxwell3D::FrontNoteRelease(VideoCommon::GpuSplit& split, const FrontState&
+     // A semaphore release of the payload register (no reduction) writes a value the front knows.
+     Regs::ReportSemaphore report{};
+     report.query.raw = query;
++    if (VideoCommon::Nx2AcqDiag::Enabled()) {
++        const GPUVAddr diag_address =
++            (GPUVAddr{fs.regs[MAXWELL3D_REG_INDEX(report_semaphore.address_high)]} << 32) |
++            fs.regs[MAXWELL3D_REG_INDEX(report_semaphore.address_low)];
++        if (const auto device = memory_manager.GpuToCpuAddress(diag_address)) {
++            VideoCommon::Nx2AcqDiag::NoteSource(*device, VideoCommon::Nx2AcqDiag::Src3DReport);
++        }
++    }
+     if (report.query.operation != Regs::ReportSemaphore::Operation::Release ||
+         report.query.report != Regs::ReportSemaphore::Report::Payload ||
+         report.query.reduction_enable != 0) {
+diff --git a/src/video_core/engines/maxwell_dma.cpp b/src/video_core/engines/maxwell_dma.cpp
+index 0b05417..ed3b936 100644
+--- a/src/video_core/engines/maxwell_dma.cpp
++++ b/src/video_core/engines/maxwell_dma.cpp
+@@ -15,6 +15,7 @@
+ #include "video_core/engines/maxwell_dma.h"
+ #include "video_core/guest_memory.h"
+ #include "video_core/memory_manager.h"
++#include "video_core/nx2_acq_diag.h"
+ #include "video_core/renderer_base.h"
+ #include "video_core/textures/decoders.h"
+ 
+@@ -380,6 +381,11 @@ void MaxwellDMA::ReleaseSemaphore() {
+     const GPUVAddr address = regs.semaphore.address;
+     const u32 payload = regs.semaphore.payload;
+     VideoCommon::QueryPropertiesFlags flags{VideoCommon::QueryPropertiesFlags::IsAFence};
++    if (VideoCommon::Nx2AcqDiag::Enabled() && type != LaunchDMA::SemaphoreType::NONE) {
++        if (const auto device = memory_manager.GpuToCpuAddress(address)) {
++            VideoCommon::Nx2AcqDiag::NoteSource(*device, VideoCommon::Nx2AcqDiag::SrcDma);
++        }
++    }
+     switch (type) {
+     case LaunchDMA::SemaphoreType::NONE:
+         break;
+diff --git a/src/video_core/engines/puller.cpp b/src/video_core/engines/puller.cpp
+index a057caa..916777a 100644
+--- a/src/video_core/engines/puller.cpp
++++ b/src/video_core/engines/puller.cpp
+@@ -24,6 +24,8 @@
+ #include "video_core/gpu_split.h"
+ #include "video_core/memory_manager.h"
+ #include "video_core/nx2.h"
++#include "video_core/nx2_acq_diag.h"
++#include "video_core/nx2_qmd_front.h"
+ #include "video_core/rasterizer_interface.h"
+ 
+ namespace Tegra::Engines {
+@@ -71,6 +73,11 @@ void NoteQueuedRelease(DmaPusher& dma_pusher, GPUVAddr address, u32 payload) {
+         return value != nullptr && value[0] == '1';
+     }();
+     auto& split = VideoCommon::GpuSplit::Get();
++    if (VideoCommon::Nx2AcqDiag::Enabled()) {
++        if (const auto device = dma_pusher.memory_manager.GpuToCpuAddress(address)) {
++            VideoCommon::Nx2AcqDiag::NoteSource(*device, VideoCommon::Nx2AcqDiag::SrcPullerRelease);
++        }
++    }
+     if (!enabled || !split.Active()) {
+         return;
+     }
+@@ -85,6 +92,10 @@ void NoteQueuedRelease(DmaPusher& dma_pusher, GPUVAddr address, u32 payload) {
+ // than guest memory). It counts as a host sync for later GPU-written command lists, as the drain
+ // did. Equal and mask acquires always drain. Ported from zortos293/Lichii#166 (e56b37fc0a), with
+ // the queued-writer check added.
++// EDEN_NX2_ACQ_DIAG: why the last MetByQueuedRelease missed (front thread only).
++u32 g_diag_miss = 0;
++u32 g_diag_recorded = 0;
++
+ // A release still queued for the split's back meets the acquire: the back runs it before the
+ // acquire's channel goes on, so the acquire needs no drain (GpuSplit::QueuedReleasePayload).
+ bool MetByQueuedRelease(DmaPusher& dma_pusher, const Puller::PendingAcquire& acquire) {
+@@ -98,6 +109,8 @@ bool MetByQueuedRelease(DmaPusher& dma_pusher, const Puller::PendingAcquire& acq
+     }
+     u32 miss = 0;
+     const auto payload = split.QueuedReleasePayload(*device, acquire.address, &miss);
++    g_diag_miss = payload ? 4 : miss;
++    g_diag_recorded = payload.value_or(0);
+     if (!payload || !acquire.Matches(*payload)) {
+         if (VideoCommon::Nx2Profile::Enabled()) {
+             using Counter = VideoCommon::Nx2Profile::Counter;
+@@ -329,6 +342,7 @@ void Puller::ProcessSemaphoreTriggerMethod(DmaPusher& dma_pusher) {
+         if (auto& split = VideoCommon::GpuSplit::Get(); split.Active()) {
+             if (const auto device = dma_pusher.memory_manager.GpuToCpuAddress(sequence_address)) {
+                 split.NoteRelease(*device, sequence_address, payload);
++                VideoCommon::Nx2AcqDiag::NoteSource(*device, VideoCommon::Nx2AcqDiag::SrcPullerWriteLong);
+             }
+         }
+     } else if (g_nx2_ampere) {
+@@ -355,8 +369,33 @@ void Puller::ProcessSemaphoreTriggerMethod(DmaPusher& dma_pusher) {
+             GequalMetWithoutDrain(dma_pusher, acquire.address, acquire.value)) {
+             return;
+         }
++        const auto qmd_device = VideoCommon::Nx2QmdFront::Mode() != 0
++                                    ? dma_pusher.memory_manager.GpuToCpuAddress(acquire.address)
++                                    : std::nullopt;
++        const bool qmd_predicted = qmd_device && op == GpuSemaphoreOperation::AcquireGequal &&
++                                   VideoCommon::GpuSplit::Get().Active() &&
++                                   VideoCommon::Nx2QmdFront::Mirror::Get().Predicts(*qmd_device,
++                                                                                    acquire.value);
++        if (qmd_predicted && VideoCommon::Nx2QmdFront::Mode() == 1) {
++            VideoCommon::GpuSplit::Get().NoteSync();
++            VideoCommon::Nx2QmdFront::Mirror::Get().CountFast();
++            return;
++        }
+         DrainBack();
+-        if (acquire.Matches(ReadSemaphoreWord(dma_pusher, acquire.address))) {
++        const u32 word_after_drain = ReadSemaphoreWord(dma_pusher, acquire.address);
++        const bool met_after_drain = acquire.Matches(word_after_drain);
++        if (qmd_device) {
++            VideoCommon::Nx2QmdFront::Mirror::Get().Observe(*qmd_device, word_after_drain,
++                                                            acquire.value, qmd_predicted);
++        }
++        if (VideoCommon::Nx2AcqDiag::Enabled()) {
++            if (const auto device = dma_pusher.memory_manager.GpuToCpuAddress(acquire.address)) {
++                VideoCommon::Nx2AcqDiag::NoteDrain(*device, g_diag_miss, acquire.value,
++                                                   met_after_drain, g_diag_recorded);
++            }
++            VideoCommon::Nx2AcqDiag::MaybeReport();
++        }
++        if (met_after_drain) {
+             VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquireMetAfterDrain, 1);
+             return;
+         }
+diff --git a/src/video_core/gpu_split.cpp b/src/video_core/gpu_split.cpp
+index cc062e1..7fa6df5 100644
+--- a/src/video_core/gpu_split.cpp
++++ b/src/video_core/gpu_split.cpp
+@@ -29,6 +29,7 @@
+ #include "video_core/nx2.h"
+ #include "video_core/nx2_perf.h"
+ #include "video_core/nx2_profile.h"
++#include "video_core/nx2_qmd_front.h"
+ 
+ namespace VideoCommon {
+ 
+@@ -376,6 +377,9 @@ bool GpuSplit::HasQueuedMemoryWriters(GPUVAddr begin, GPUVAddr end) {
+ }
+ 
+ void GpuSplit::NoteRelease(u64 device, GPUVAddr address, u32 payload) {
++    if (Nx2QmdFront::Mode() != 0) {
++        Nx2QmdFront::Mirror::Get().NoteOtherWriter(device);
++    }
+     static const bool enabled = [] {
+         const char* const value = std::getenv("EDEN_NX2_ACQUIRE_QUEUED");
+         return value == nullptr || value[0] != '0';
+diff --git a/src/video_core/nx2_acq_diag.h b/src/video_core/nx2_acq_diag.h
+new file mode 100644
+index 0000000..1ede93b
+--- /dev/null
++++ b/src/video_core/nx2_acq_diag.h
+@@ -0,0 +1,137 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++// EDEN_NX2_ACQ_DIAG=1: which semaphore words the split's front still drains for, and which engine
++// releases them. Logs the top words every 10 s.
++
++#pragma once
++
++#include <algorithm>
++#include <chrono>
++#include <cstdlib>
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++#include "common/common_types.h"
++#include "common/logging.h"
++
++namespace VideoCommon::Nx2AcqDiag {
++
++enum Source : u32 {
++    SrcPullerWriteLong = 1,
++    SrcPullerRelease = 2,
++    SrcSemExecute = 4,
++    Src3DReport = 8,
++    SrcComputeReport = 16,
++    SrcQmdPlain = 32,
++    SrcQmdMax = 64,
++    SrcQmdAdd = 128,
++    SrcDma = 256,
++    SrcCpu = 512,
++};
++
++inline bool Enabled() {
++    static const bool enabled = [] {
++        const char* value = std::getenv("EDEN_NX2_ACQ_DIAG");
++        return value != nullptr && value[0] == '1';
++    }();
++    return enabled;
++}
++
++struct State {
++    std::mutex mutex;
++    std::unordered_map<u64, u32> sources; // device word -> Source bits
++    struct Word {
++        u64 drained{};
++        u64 met_after{};
++        u32 miss_bits{};
++        u32 last_value{};
++        u32 last_recorded{};
++    };
++    std::unordered_map<u64, Word> words;
++    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
++};
++
++inline State& Get() {
++    static State state;
++    return state;
++}
++
++inline void NoteSource(u64 device, u32 source) {
++    if (!Enabled()) {
++        return;
++    }
++    auto& s = Get();
++    std::scoped_lock lock{s.mutex};
++    s.sources[device & ~u64{3}] |= source;
++}
++
++/// A front drain for an acquire of `device` (miss: QueuedReleasePayload's reason).
++inline void NoteDrain(u64 device, u32 miss, u32 value, bool met_after, u32 recorded) {
++    if (!Enabled()) {
++        return;
++    }
++    auto& s = Get();
++    std::scoped_lock lock{s.mutex};
++    auto& word = s.words[device & ~u64{3}];
++    ++word.drained;
++    word.met_after += met_after ? 1 : 0;
++    word.miss_bits |= 1U << (miss & 7);
++    word.last_value = value;
++    word.last_recorded = recorded;
++}
++
++inline std::string SourceNames(u32 bits) {
++    static constexpr const char* names[] = {"writelong", "release", "sem_exec", "3d_report",
++                                            "cmp_report", "qmd_plain", "qmd_max", "qmd_add",
++                                            "dma", "cpu"};
++    std::string out;
++    for (u32 i = 0; i < 10; ++i) {
++        if (bits & (1U << i)) {
++            out += out.empty() ? names[i] : std::string{"+"} + names[i];
++        }
++    }
++    return out.empty() ? "unknown" : out;
++}
++
++inline void MaybeReport() {
++    if (!Enabled()) {
++        return;
++    }
++    auto& s = Get();
++    std::scoped_lock lock{s.mutex};
++    const auto now = std::chrono::steady_clock::now();
++    if (now - s.start < std::chrono::seconds{10}) {
++        return;
++    }
++    s.start = now;
++    std::vector<std::pair<u64, State::Word>> top(s.words.begin(), s.words.end());
++    std::ranges::sort(top, [](const auto& a, const auto& b) { return a.second.drained > b.second.drained; });
++    u64 total{};
++    std::unordered_map<std::string, u64> by_source;
++    for (const auto& [device, word] : top) {
++        total += word.drained;
++        const auto it = s.sources.find(device);
++        by_source[SourceNames(it == s.sources.end() ? 0 : it->second)] += word.drained;
++    }
++    std::string summary;
++    for (const auto& [name, count] : by_source) {
++        summary += fmt::format(" {}={}", name, count);
++    }
++    LOG_INFO(HW_GPU, "AcqDiag: {} drains on {} words in 10 s, by release source:{}", total,
++             top.size(), summary);
++    for (size_t i = 0; i < std::min<size_t>(top.size(), 8); ++i) {
++        const auto& [device, word] = top[i];
++        const auto it = s.sources.find(device);
++        LOG_INFO(HW_GPU,
++                 "AcqDiag:   {:#x} drained {} met_after {} miss_bits {:#x} value {:#x} recorded "
++                 "{:#x} source {}",
++                 device, word.drained, word.met_after, word.miss_bits, word.last_value,
++                 word.last_recorded, SourceNames(it == s.sources.end() ? 0 : it->second));
++    }
++    s.words.clear();
++}
++
++} // namespace VideoCommon::Nx2AcqDiag
+diff --git a/src/video_core/nx2_qmd_front.h b/src/video_core/nx2_qmd_front.h
+new file mode 100644
+index 0000000..b9f2ef3
+--- /dev/null
++++ b/src/video_core/nx2_qmd_front.h
+@@ -0,0 +1,299 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++// EDEN_NX2_QMD_TRACK (experiment): the split's front mirrors the native QMD scheduler
++// (native_qmd.h) to know the semaphore releases queued compute work makes, so a GEQUAL acquire
++// of a word only QMD releases advance needs no drain when the releases already sent meet it.
++//   =1: use the prediction (no drain when it meets the acquire)
++//   =2: verify only: predict, drain anyway, log predictions the real word does not confirm
++// Ocarina's village drains ~700 times a second on two such words (a QMD add counter and a QMD
++// max release), and every one of them was met after the drain.
++//
++// Only the front thread touches this. Its scheduler state follows the same signals as the
++// back's, in the same order; descriptors come from guest memory (CPU-written QMDs) or from the
++// inline QMD words the front holds. A word another engine releases, or one whose real value ever
++// differs from the prediction, is not predicted again.
++
++#pragma once
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <cstdlib>
++#include <unordered_map>
++
++#include "common/common_types.h"
++#include "common/logging.h"
++#include "video_core/memory_manager.h"
++#include "video_core/nx2.h"
++
++namespace VideoCommon::Nx2QmdFront {
++
++using Descriptor = std::array<u32, 64>;
++
++inline int Mode() {
++    static const int mode = [] {
++        const char* value = std::getenv("EDEN_NX2_QMD_TRACK");
++        return value == nullptr ? 0 : value[0] == '2' ? 2 : value[0] == '1' ? 1 : 0;
++    }();
++    return mode;
++}
++
++class Mirror {
++public:
++    static Mirror& Get() {
++        static Mirror mirror;
++        return mirror;
++    }
++
++    /// The back writes an inline QMD's 256 bytes at `address` (method 0x107).
++    void InlineWrite(GPUVAddr address, const u32* qmd_words) {
++        if (overlay.size() > 8192) {
++            overlay.clear();
++        }
++        auto& descriptor = overlay[address];
++        std::copy_n(qmd_words, descriptor.size(), descriptor.begin());
++    }
++
++    /// A PCAS signal the back hands to NativeQmdScheduler::Signal.
++    void Signal(Tegra::MemoryManager& memory, GPUVAddr address, u32 argument) {
++        struct Pending {
++            GPUVAddr address;
++            u32 action;
++            u32 count;
++        };
++        std::array<Pending, 256> pending{};
++        size_t count = 1;
++        pending[0] = {address, argument & 15, ((argument >> 14) & 0x3ff) + 1};
++        for (size_t i = 0; i < count; ++i) {
++            const auto request = pending[i];
++            if (states.size() >= 4096 && !states.contains(request.address)) {
++                std::erase_if(states, [](const auto& entry) {
++                    return entry.second.completed && entry.second.deferred == 0;
++                });
++                if (states.size() >= 4096) {
++                    return Lost();
++                }
++            }
++            auto& state = states[request.address];
++            if (request.action == 3 || request.action == 2) {
++                if (request.action == 3 || !state.loaded) {
++                    if (!Read(memory, request.address, state.descriptor)) {
++                        return Lost();
++                    }
++                    const auto& qmd = state.descriptor;
++                    if ((qmd[18] & 0xff) != 0x30 || (qmd[4] & 0x100)) {
++                        return Lost();
++                    }
++                    state.dependencies = static_cast<s32>((qmd[4] >> 14) & 0xffff) + state.deferred;
++                    state.deferred = 0;
++                    state.loaded = true;
++                    state.completed = false;
++                }
++                state.scheduled = true;
++            } else if (request.action == 7 || request.action == 12) {
++                const s32 delta = request.action == 7 ? -static_cast<s32>(request.count)
++                                                      : static_cast<s32>(request.count);
++                if (!state.loaded || state.completed) {
++                    state.deferred += delta;
++                    continue;
++                }
++                state.dependencies += delta;
++            } else if (request.action == 0 || request.action == 1) {
++                continue;
++            } else {
++                return Lost();
++            }
++            if (!state.loaded || !state.scheduled || state.completed || state.dependencies > 0) {
++                continue;
++            }
++            if (state.dependencies < 0 || !Read(memory, request.address, state.descriptor)) {
++                return Lost();
++            }
++            const auto qmd = state.descriptor;
++            if ((qmd[18] & 0xff) != 0x30 || (qmd[4] & 0x100)) {
++                return Lost();
++            }
++            state.completed = true;
++            for (const u32 base : ReleaseSlots) {
++                const u32 flags = qmd[base + 1];
++                if (!(flags & (1U << 23))) {
++                    continue;
++                }
++                const GPUVAddr destination = (GPUVAddr{flags & 0xff} << 32) | qmd[base];
++                const auto device = memory.GpuToCpuAddress(destination);
++                if (!device) {
++                    return Lost();
++                }
++                Release(*device & ~u64{3}, qmd[base + 2], flags);
++            }
++            if (qmd[16] & 1) {
++                const u32 action = (qmd[16] >> 1) & 7;
++                if ((action != 4 && action != 3 && action != 1) || count == pending.size()) {
++                    return Lost();
++                }
++                pending[count++] = {GPUVAddr{qmd[15]} << 8,
++                                    action == 4 ? 7U : action == 3 ? 3U : 2U, 1};
++            }
++            if (qmd[16] & (1U << 5)) {
++                return Lost();
++            }
++        }
++    }
++
++    /// Another engine (or a release the front can't follow) writes this word.
++    void NoteOtherWriter(u64 device) {
++        if (const auto it = words.find(device & ~u64{3}); it != words.end()) {
++            it->second.excluded = true;
++        }
++    }
++
++    /// Whether the releases sent so far make the word reach `value` (GEQUAL).
++    bool Predicts(u64 device, u32 value) {
++        ++stats.asked;
++        if (lost) {
++            return false;
++        }
++        const auto it = words.find(device & ~u64{3});
++        if (it == words.end() || !it->second.base_valid || it->second.excluded) {
++            return false;
++        }
++        const u32 predicted = Predicted(it->second);
++        if (predicted < it->second.base) {
++            return false; // wrapped
++        }
++        return predicted >= value;
++    }
++
++    /// After a drain: the word's real value, with every release sent so far done.
++    void Observe(u64 device, u32 real, u32 value, bool predicted_met) {
++        auto& word = words[device & ~u64{3}];
++        if (predicted_met) {
++            ++stats.verified;
++            if (real < value) {
++                ++stats.wrong;
++                word.excluded = true;
++                if (stats.wrong <= 16) {
++                    LOG_WARNING(HW_GPU, "QmdTrack: predicted {:#x} >= {:#x} at {:#x}, real {:#x}",
++                                Predicted(word), value, device, real);
++                }
++            }
++        }
++        if (word.base_valid && !word.excluded && real != Predicted(word)) {
++            ++stats.mismatch;
++            word.excluded = true;
++            if (stats.mismatch <= 16) {
++                LOG_WARNING(HW_GPU, "QmdTrack: {:#x} predicted {:#x}, real {:#x}: not tracked",
++                            device, Predicted(word), real);
++            }
++        }
++        word.base = real;
++        word.add = 0;
++        word.max = 0;
++        word.has_max = false;
++        word.base_valid = true;
++        lost = false;
++        MaybeReport();
++    }
++
++    void CountFast() {
++        ++stats.fast;
++    }
++
++private:
++    struct State {
++        Descriptor descriptor{};
++        s32 dependencies{};
++        s32 deferred{};
++        bool loaded{};
++        bool scheduled{};
++        bool completed{};
++    };
++    struct Word {
++        u32 base{};
++        u32 add{};
++        u32 max{};
++        bool has_max{};
++        bool base_valid{};
++        bool excluded{};
++        bool used_add{};
++        bool used_max{};
++    };
++    static constexpr std::array<u32, 3> ReleaseSlots{24, 28, 52};
++
++    static u32 Predicted(const Word& word) {
++        u32 value = word.base + word.add;
++        if (word.has_max) {
++            value = (std::max)(value, word.max);
++        }
++        return value;
++    }
++
++    void Release(u64 device, u32 payload, u32 flags) {
++        auto& word = words[device];
++        if (flags & (1U << 26)) {
++            word.add += payload;
++            word.used_add = true;
++        } else if (flags & (1U << 19)) {
++            word.max = word.has_max ? (std::max)(word.max, payload) : payload;
++            word.has_max = true;
++            word.used_max = true;
++        } else {
++            word.excluded = true; // plain writes: left to the queued-release path
++        }
++        if (word.used_add && word.used_max) {
++            word.excluded = true; // max(base + adds, max) is only right in one order
++        }
++    }
++
++    bool Read(Tegra::MemoryManager& memory, GPUVAddr address, Descriptor& descriptor) {
++        if (const auto it = overlay.find(address); it != overlay.end()) {
++            descriptor = it->second;
++            return true;
++        }
++        if (!memory.IsFullyMappedRange(address, sizeof(descriptor))) {
++            return false;
++        }
++        for (GPUVAddr page = address & ~GPUVAddr{0xfff}; page < address + sizeof(descriptor);
++             page += 0x1000) {
++            const auto device = memory.GpuToCpuAddress(page);
++            if (!device || Tegra::Nx2IsGpuWritten(*device)) {
++                return false; // GPU work may have written it: the front's copy may be stale
++            }
++        }
++        memory.ReadBlockUnsafe(address, descriptor.data(), sizeof(descriptor));
++        return true;
++    }
++
++    void Lost() {
++        // The mirror may now differ from the back: predict nothing until the next drain shows
++        // the real words (Observe).
++        lost = true;
++        ++stats.lost;
++    }
++
++    void MaybeReport() {
++        const auto now = std::chrono::steady_clock::now();
++        if (now - report_start < std::chrono::seconds{10}) {
++            return;
++        }
++        report_start = now;
++        LOG_INFO(HW_GPU,
++                 "QmdTrack: asked {} fast {} verified {} wrong {} mismatch {} lost {} words {} "
++                 "states {} (10 s)",
++                 stats.asked, stats.fast, stats.verified, stats.wrong, stats.mismatch, stats.lost,
++                 words.size(), states.size());
++        stats = {};
++    }
++
++    std::unordered_map<GPUVAddr, State> states;
++    std::unordered_map<GPUVAddr, Descriptor> overlay;
++    std::unordered_map<u64, Word> words;
++    bool lost{};
++    struct Stats {
++        u64 asked{}, fast{}, verified{}, wrong{}, mismatch{}, lost{};
++    } stats;
++    std::chrono::steady_clock::time_point report_start = std::chrono::steady_clock::now();
++};
++
++} // namespace VideoCommon::Nx2QmdFront
+-- 
+2.56.0.windows.4
+

@@ -1,89 +1,87 @@
-<!--
-# SPDX-FileCopyrightText: Copyright 2025 Eden Emulator Project
-# SPDX-License-Identifier: GPL-3.0-or-later
-
-# SPDX-FileCopyrightText: 2018 yuzu Emulator Project
-# SPDX-License-Identifier: GPL-2.0-or-later
--->
-
 <p align="center">
-  <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
+  <img src="leshu/leshu.png" alt="Leshu" width="160">
 </p>
 
-# Lichii
+# Lichii Leshu
 
-Lichii is an experimental, open-source Nintendo Switch and Switch 2 emulator written in C++. It builds on Eglantine, Eden, yuzu and Sudachi, preserving their contributions while developing this fork's game compatibility and renderer fixes.
+**English** · [Español](README.es.md)
 
-This is an independent fork, not an official release of those upstream projects. Lichii is not affiliated with Nintendo.
+**Leshu** is a performance build of [Lichii Frizti](https://github.com/Frizti/Lichii), the Switch 2 emulator fork tuned for *The Legend of Zelda: Ocarina of Time*. It does not change what the emulator emulates. It is the same code as Frizti v3, built differently:
 
-## Downloads and setup
+- **clang-cl + ThinLTO + PGO** (Profile-Guided Optimization trained on Ocarina of Time in six areas).
+- **Generic x86-64-v3 build**: runs on any CPU with AVX2 (Intel 4th gen / Haswell or newer, any AMD Ryzen).
+- **Ready to play**: Frizti v3's tuned defaults for Ocarina of Time are built in. Add your keys and firmware, open the game.
 
-Published builds belong on this fork's [releases page](https://github.com/zortos293/Eglantine/releases). The repository still uses its historical Eglantine name; the desktop application is now Lichii.
+> All credit for the emulator goes to its authors (see **Credits**). Leshu only builds, measures and tunes it.
 
-On Windows, extract the entire build archive and run **lichii.exe**. Only use games and system files you have legally obtained. Games, keys and firmware are not included.
+## Results
 
-### Existing saves and settings
+Docked mode, 1080p, i7-11700F + RTX 3060, Link standing still, mean FPS over 96 s after the save loads.
 
-The rebrand intentionally retains the existing Eden/Eglantine data directories and configuration keys. It does not move or delete saves, settings or shader caches. Back up your saves before testing experimental builds.
+| Area | Frizti v3 (official build) | **Leshu 1** |
+|---|---|---|
+| Kokiri Village | 34.1 | **35.3 (+3.5%)** |
+| Hyrule Field | 43.3 | **43.9 (+1%)** |
 
-## Compatibility and issue reports
+Village: mean of two runs each; Hyrule: one run each. The gain is small because the official Frizti v3 builds already use clang + PGO (with their own profile); Leshu's profile is trained on Ocarina of Time only. Bigger gains need code changes: that is the plan for Leshu 2.
 
-Compatibility and performance vary by game, hardware and driver. Rendering errors, stutters and crashes remain possible. Passing automated tests does not establish that a game renders correctly, and this project makes no universal frame-rate guarantee.
+## Install (Windows)
 
-When [reporting an issue](https://github.com/zortos293/Eglantine/issues), include:
+1. Install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you don't have it.
+2. Download `Leshu-1-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
+3. Put your own `prod.keys` and `title.keys` in `user/keys/` and install the firmware dumped from your own console (Tools → Install Firmware).
+4. Run **lichii.exe**, add your game folder and play.
 
-- The exact build, game version, CPU, GPU and driver version.
-- Relevant settings and steps to reproduce the problem.
-- A screenshot and the log from the affected session, after checking it for personal information.
+The `user` folder next to `lichii.exe` makes the build portable: saves, settings and shader cache stay inside it. To reuse an existing Lichii/Eden setup, copy your old `user` folder there (back up your saves first).
 
-Do not upload game files, keys, firmware or private account information.
+Leshu contains **no keys, firmware or games**. Dump them from your own console.
 
-## Building and contributing
+### Settings
 
-See the [build guide](docs/Build.md), [user documentation](docs/user/README.md) and [coding guidelines](docs/Coding.md). Some inherited documentation and internal build target names still use upstream names. The GUI build target remains `yuzu`; its output is `lichii.exe` on Windows and `lichii` on other desktop platforms.
+Nothing has to be set. `nx2_switches.txt` next to the executable lists the GPU switches with comments, for anyone who wants to experiment. Frizti v3's defaults (Docked, 8 GB memory, GPU accuracy Low, async shaders and presentation, the 60/30 FPS choice for Ocarina) apply automatically.
 
-Keep changes focused and distinguish code-level checks from actual gameplay testing.
+## What was measured and did not help
 
-## Artwork
-Art created by YOB (yobslab)
-The supplied Lichii logo, icon and library artwork are in [dist/branding](dist/branding). Windows, Linux and macOS icon resources are generated from that artwork by [Generate-LichiiIcons.ps1](tools/Generate-LichiiIcons.ps1).
+Within ±1 FPS on this PC: GPU fence "Immediate", CPU accuracy "Unsafe", DLSS replacement, disabling post-processing, VSync off, 8 vs 12 GB memory layout, most `EDEN_NX2_PERF_ON` experiments, and skipping the compute-to-graphics and wait-for-idle barriers Frizti v3 added (#295).
 
-## Support Lichii
+Handheld (720p) is ~5 FPS faster than Docked (1080p) in Hyrule Field, where the GPU is ~80% busy. In small areas the CPU side is the limit and both modes perform the same.
 
-Lichii is free and stays free. If you want to help, you can donate in crypto. Donations help pay for the AI tools and build machines used to develop this open-source project faster.
+## Building Leshu
 
-**Solana (SOL)**
-```text
-JepEjfyWjGjhJvHSrqj52KtLjcbbbmUh1iGqerYBF4w
+Requirements: Visual Studio 2022/2026 with "Desktop development with C++", the C++ Clang tools and CMake tools components, and the Vulkan SDK.
+
+```bat
+:: Optimized build with the profile (download leshu-pgo-profile.zip from Releases to pgo\v3.profdata)
+leshu\scripts\configure_leshu.bat use
+leshu\scripts\build_dir.bat build-leshu
 ```
 
-**Ethereum (ETH)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+To train your own profile: `configure_leshu.bat gen`, build `build-leshugen`, run the instrumented `eden-cli` in a few areas (`leshu/bench/pgotrain_v3.sh` closes it gracefully so the `.profraw` files are written), then `llvm-profdata merge -o pgo\v3.profdata <files>.profraw`.
 
-**Bitcoin (BTC)**
-```text
-bc1qcvxdpf4qvdhqp8ee4s355cjmxrzsphsdwpl8w4
-```
+Ninja does not rebuild when only the `.profdata` changes: delete the `.obj` files first. The scripts contain absolute paths (`D:\lichii\...`); adjust them to yours.
 
-**BNB Smart Chain (BNB)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+## Automated benchmark (`leshu/bench/`)
 
-**Polygon**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+Boots the game, loads the latest save through a key script, and logs FPS without anyone playing, so every change can be compared fairly. Set `ROM` to the path of your own dump.
 
-Send each coin on its matching network. Coins sent on the wrong network can't be recovered.
+- `bench.sh` / `run1.sh` / `batch.sh`: `eden-cli` runs with a switch file and config overrides (`setcfg.py`).
+- `qtbench.py` / `qtpair.sh`: the same for `lichii.exe` through its debug server.
+- `gpurun.sh`: also logs GPU use with `nvidia-smi`.
 
-> [!NOTE]
-> Donations are voluntary gifts and are non-refundable. A donation does not buy any product, service, perk, early access, exclusive build, priority support or say in the project. Every release stays free and public for everyone.
+Lessons: compare versions only at identical graphics settings (Docked vs handheld alone moved Hyrule by 5 FPS), wait until ~22 GB of commit is free before each run, and parse FPS lines strictly.
 
-## Credits and license
+`leshu/patches-v2-experiments/` holds experiments against Frizti v2 (semaphore acquires, QMD release prediction). They were correct but gave no FPS and are not in Leshu 1.
 
-Lichii inherits the work of the Eglantine, Eden, yuzu and Sudachi projects and their contributors, including Eglantine's original developer Camille LaVey. Original copyright notices and third-party licenses are retained.
+## Credits
 
-See [LICENSE.txt](LICENSE.txt) and the source files for applicable license terms.
+- **Lichii Frizti** by Frizti — the base of Leshu, with the Ocarina of Time work.
+- **Lichii** by zortos293 and contributors.
+- **Eglantine**, **Eden** and **Sudachi**, and the **yuzu** project before them.
+- **Dynamic FPS by Dark** (bundled in Lichii Frizti), **EvilOOT** and everyone whose fixes Frizti ported.
+- Leshu builds and benchmarks: leshupro, with Claude (Anthropic).
+
+The original Lichii README is in [README.lichii.md](README.lichii.md).
+
+## License
+
+GPL-3.0-or-later, like Lichii. Lichii and Leshu are not affiliated with Nintendo.

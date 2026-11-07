@@ -1,0 +1,94 @@
+From 762dfd94e1f03edc35b6aa59e15be9ae0658addd Mon Sep 17 00:00:00 2001
+From: local <local@localhost>
+Date: Fri, 6 Nov 2026 01:45:26 -0600
+Subject: [PATCH 1/2] Experiment: ACQUIRE_RAN, larger release table,
+ NOTE_ALL_RELEASES
+
+---
+ src/video_core/engines/puller.cpp | 18 ++++++++++++++++++
+ src/video_core/gpu_split.cpp      | 12 ++++++++++++
+ src/video_core/gpu_split.h        |  2 +-
+ 3 files changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/src/video_core/engines/puller.cpp b/src/video_core/engines/puller.cpp
+index 9699d5e..a057caa 100644
+--- a/src/video_core/engines/puller.cpp
++++ b/src/video_core/engines/puller.cpp
+@@ -63,6 +63,22 @@ void DrainBack() {
+     VideoCommon::GpuSplit::Get().Drain(VideoCommon::DrainSite::Acquire);
+ }
+ 
++// EDEN_NX2_NOTE_ALL_RELEASES=1 (experiment): semaphore releases from SEMAPHORE_RELEASE and
++// SEM_EXECUTE are recorded like the WriteLong trigger's, so a later acquire they meet needs no drain.
++void NoteQueuedRelease(DmaPusher& dma_pusher, GPUVAddr address, u32 payload) {
++    static const bool enabled = [] {
++        const char* const value = std::getenv("EDEN_NX2_NOTE_ALL_RELEASES");
++        return value != nullptr && value[0] == '1';
++    }();
++    auto& split = VideoCommon::GpuSplit::Get();
++    if (!enabled || !split.Active()) {
++        return;
++    }
++    if (const auto device = dma_pusher.memory_manager.GpuToCpuAddress(address)) {
++        split.NoteRelease(*device, address, payload);
++    }
++}
++
+ // EDEN_NX2_ACQUIRE_PRECHECK=1: a GEQUAL acquire whose word already holds the value continues
+ // without draining the split, if nothing queued for the back may write the word (a release that
+ // lowers it, a fence action) and no GPU work ever wrote its page (then no cache holds a newer word
+@@ -397,6 +413,7 @@ void Puller::ProcessSemaphoreRelease(DmaPusher& dma_pusher) {
+         rasterizer->Query(sequence_address, VideoCommon::QueryType::Payload,
+                           VideoCommon::QueryPropertiesFlags::IsAFence, payload, 0);
+     });
++    NoteQueuedRelease(dma_pusher, sequence_address, payload);
+ }
+ 
+ void Puller::ProcessSemaphoreAcquire(DmaPusher& dma_pusher) {
+@@ -426,6 +443,7 @@ void Puller::ProcessSemaphoreExecute(DmaPusher& dma_pusher, u32 argument) {
+             rasterizer->Query(address, VideoCommon::QueryType::Payload,
+                               VideoCommon::QueryPropertiesFlags::IsAFence, payload, 0);
+         });
++        NoteQueuedRelease(dma_pusher, address, payload);
+         return;
+     }
+     // Acquires: check once after flushing pending fences; never block the GPU thread on them.
+diff --git a/src/video_core/gpu_split.cpp b/src/video_core/gpu_split.cpp
+index 3c92706..cc062e1 100644
+--- a/src/video_core/gpu_split.cpp
++++ b/src/video_core/gpu_split.cpp
+@@ -394,6 +394,18 @@ std::optional<u32> GpuSplit::QueuedReleasePayload(u64 device, GPUVAddr address,
+         return std::nullopt;
+     }
+     if (release.position <= done) {
++        // EDEN_NX2_ACQUIRE_RAN=1 (experiment): the back already ran the release, but its payload
++        // lands in guest memory only when its host fence signals, so the acquire used to drain.
++        // The back runs in order: what follows the acquire runs after the release there too.
++        // Same rule as a queued release: nothing still queued may write the word.
++        static const bool ran_ok = [] {
++            const char* const value = std::getenv("EDEN_NX2_ACQUIRE_RAN");
++            return value != nullptr && value[0] == '1';
++        }();
++        u32 ran_method{};
++        if (ran_ok && MemoryWriterTarget(done, address, address + sizeof(u32), ran_method) <= done) {
++            return release.payload;
++        }
+         if (miss) *miss = 2;
+         return std::nullopt;
+     }
+diff --git a/src/video_core/gpu_split.h b/src/video_core/gpu_split.h
+index e118607..6bf8779 100644
+--- a/src/video_core/gpu_split.h
++++ b/src/video_core/gpu_split.h
+@@ -441,7 +441,7 @@ private:
+         u64 device;
+         u32 payload;
+     };
+-    std::array<QueuedRelease, 64> queued_releases{};
++    std::array<QueuedRelease, 1024> queued_releases{};
+     /// Drops consumed ranged writes; returns the position a memory read of [begin, end) waits
+     /// for and the method behind it.
+     u64 MemoryWriterTarget(u64 done, GPUVAddr begin, GPUVAddr end, u32& target_method);
+-- 
+2.56.0.windows.4
+
