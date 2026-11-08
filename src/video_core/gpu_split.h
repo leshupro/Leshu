@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -165,6 +166,59 @@ public:
     /// Waits until the back executed the compute and copy work sent so far (not what came after).
     /// Returns whether any of it was still queued.
     bool WaitForWriters();
+    /// Macro DMA read snapshots (EDEN_NX2_DMA_SNAPSHOT): memory-writing work whose range the
+    /// front knows nothing about was just sent (KeplerMemory and Fermi2D methods).
+    void NoteUnrangedWriter() {
+        last_memory_writer_position = write_position;
+        last_unranged_position = write_position;
+    }
+    /// Memory-writing work was just sent; its range, if known, comes with NoteMemoryWrite.
+    void NoteMemoryWriter() {
+        last_memory_writer_position = write_position;
+    }
+    /// Work that writes the device range [begin, begin + size) was just sent (an inline upload, a
+    /// report, a semaphore release). size ~0 means an unknown range.
+    void NoteMemoryWrite(u64 begin = 0, u64 size = ~u64{0}) {
+        last_memory_writer_position = write_position;
+        PendingWrite& write = pending_writes[pending_write_count++ % pending_writes.size()];
+        write.begin = begin;
+        write.end = size == ~u64{0} ? ~u64{0} : begin + size;
+        write.position = write_position;
+    }
+    /// The ring position of everything sent so far.
+    [[nodiscard]] u64 SentPosition() const {
+        return write_position;
+    }
+    [[nodiscard]] u64 LastWriterPosition() const {
+        return last_writer_position;
+    }
+    [[nodiscard]] u64 LastUnrangedPosition() const {
+        return last_unranged_position;
+    }
+    /// Whether work sent after position `since` may write device bytes [begin, begin + size):
+    /// compute or copies (any range), unranged writers, or a noted write that overlaps the range.
+    /// Also true when more writes were noted since than are remembered.
+    [[nodiscard]] bool MayBeWrittenSince(u64 since, u64 begin, u64 size) const {
+        if (last_writer_position > since || last_unranged_position > since) {
+            return true;
+        }
+        if (last_memory_writer_position <= since) {
+            return false;
+        }
+        const u64 end = begin + size;
+        const u64 remembered = (std::min<u64>)(pending_write_count, pending_writes.size());
+        for (u64 scanned = 0; scanned < remembered; ++scanned) {
+            const PendingWrite& write =
+                pending_writes[(pending_write_count - 1 - scanned) % pending_writes.size()];
+            if (write.position <= since) {
+                return false;
+            }
+            if (write.begin < end && begin < write.end) {
+                return true;
+            }
+        }
+        return remembered == pending_writes.size();
+    }
     /// A host-level wait was just sent (a syncpoint acquire, a host WFI, a GP entry with its sync
     /// bit; semaphore acquires drain): the guest's GPU work before it is complete before the
     /// commands after it are fetched.
@@ -246,6 +300,15 @@ private:
     // Front side.
     u64 write_position{};
     u64 last_writer_position{};
+    u64 last_memory_writer_position{};
+    u64 last_unranged_position{};
+    struct PendingWrite {
+        u64 begin;
+        u64 end;
+        u64 position;
+    };
+    std::array<PendingWrite, 8192> pending_writes{};
+    u64 pending_write_count{};
     u64 last_sync_position{};
     u64 published_local{};
     u64 consumed_cache{};

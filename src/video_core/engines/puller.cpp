@@ -53,8 +53,18 @@ template <typename Func>
 void OnBack(const Func& func) {
     if (auto& split = VideoCommon::GpuSplit::Get(); split.Active()) {
         split.Defer(func);
+        split.NoteMemoryWrite();
     } else {
         func();
+    }
+}
+
+// A semaphore release queued for the split's back: ends the macro DMA read snapshots of its bytes.
+void NoteSemaphoreWrite(DmaPusher& dma_pusher, GPUVAddr address) {
+    auto& split = VideoCommon::GpuSplit::Get();
+    split.NoteMemoryWriter();
+    if (const auto device = dma_pusher.memory_manager.GpuToCpuAddress(address)) {
+        split.NoteMemoryWrite(*device, 16);
     }
 }
 
@@ -396,6 +406,10 @@ void Puller::CallPullerMethod(DmaPusher& dma_pusher, const MethodCall& method_ca
         break;
     case BufferMethods::SemaphoreOperation: {
         ProcessSemaphoreTriggerMethod(dma_pusher);
+        if (static_cast<GpuSemaphoreOperation>(regs.semaphore_trigger & 0xF) ==
+            GpuSemaphoreOperation::WriteLong) {
+            NoteSemaphoreWrite(dma_pusher, regs.semaphore_address.SemaphoreAddress());
+        }
         break;
     }
     case BufferMethods::NonStallInterrupt: {
@@ -428,6 +442,12 @@ void Puller::CallPullerMethod(DmaPusher& dma_pusher, const MethodCall& method_ca
             ProcessSemaphoreExecute(dma_pusher, method_call.argument);
         } else {
             ProcessSemaphoreRelease(dma_pusher);
+        }
+        if (g_nx2_ampere && (method_call.argument & 7) == 1) {
+            NoteSemaphoreWrite(dma_pusher, (GPUVAddr{regs.reg_array[0x18] & 0x1FFFFFF} << 32) |
+                                               (regs.reg_array[0x17] & ~3U));
+        } else if (!g_nx2_ampere) {
+            NoteSemaphoreWrite(dma_pusher, regs.semaphore_address.SemaphoreAddress());
         }
         break;
     }
