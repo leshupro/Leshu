@@ -2,15 +2,27 @@
   <img src="leshu/leshu.png" alt="Leshu" width="160">
 </p>
 
-# Lichii Leshu 5
+# Lichii Leshu 6
 
 **English** · [Español](README.es.md)
 
-**Leshu 5** is [zortos293/Lichii](https://github.com/zortos293/Lichii) **build 117** (a Switch 2 emulator) with one addition: **frame generation spacing**. All other code, the settings and the PGO profile are the ones zortos293 ships.
+**Leshu 6** is [zortos293/Lichii](https://github.com/zortos293/Lichii) **build 117** (a Switch 2 emulator) with two additions: **macro DMA read snapshots** and **frame generation spacing**. All other code, the settings and the PGO profile are the ones zortos293 ships.
 
-> Playing normally, without frame generation, Leshu 5 is **not faster** than the official build 117. If you don't use frame generation, use the official build.
+## Macro DMA read snapshots (new in Leshu 6)
 
-## What it adds
+Ocarina of Time reads an occlusion report for each object about 40,000 times a second, and each read made the two GPU threads wait for each other. Leshu 6 skips that wait while nothing sent since can have changed those bytes. The idea is EvilOOT's fix, as ported to Lichii Frizti by Frizti; Leshu adapts it to build 117.
+
+Same program with the fix off and on, handheld 720p, i7-11700F + RTX 3060:
+
+| | Off | **On** |
+|---|---|---|
+| Kokiri Village, standing | 29.6 | **32.3 (+9%)** |
+| Hyrule Field, standing | 35.6 | **38.2 (+7%)** |
+| Kokiri Village, walking (two runs) | 28.6 / 28.7 | **40.7 / 32.6** |
+
+Walking FPS varies a lot with the camera, so treat those two as approximate. In verify mode every skipped read was compared with the slow path: 0 differences in 11.5 million reads. Build 117 has no flash detector, so white flashes were only checked by eye, in one play session on one PC. `EDEN_NX2_DMA_SNAPSHOT=0` in `nx2_switches.txt` turns it off.
+
+## Frame generation spacing
 
 With frame generation on, each generated frame was presented right before its real one, so frames arrived in pairs. Leshu 5 spaces them evenly.
 
@@ -29,7 +41,7 @@ To use it: Emulation → Configure → Graphics → Enable Frame Generation (FSR
 ## Install (Windows)
 
 1. Install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you don't have it.
-2. Download `Leshu-5-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
+2. Download `Leshu-6-Windows-x64.zip` from [Releases](https://github.com/leshupro/Leshu/releases) and extract the whole folder.
 3. Put your own `prod.keys` and `title.keys` in `user/keys/` and install the firmware dumped from your own console (Tools → Install Firmware).
 4. Run **lichii.exe**. It creates the settings recommended by zortos293 on first start.
 
@@ -48,14 +60,15 @@ leshu\scripts\configure_z.bat build-z117 D:/lichii/zsrc/lichii-windows.profdata
 leshu\scripts\build_dir.bat build-z117
 ```
 
-Leshu 1-4 (based on Lichii Frizti v3) are on the [`leshu` branch](https://github.com/leshupro/Leshu/tree/leshu).
+Leshu 5 is on the [`leshu5` branch](https://github.com/leshupro/Leshu/tree/leshu5). Leshu 1-4 (based on Lichii Frizti v3) are on the [`leshu` branch](https://github.com/leshupro/Leshu/tree/leshu).
 
 ## Credits
 
-- **Lichii** by zortos293 and contributors: everything in Leshu 5 except the frame spacing.
-- **Lichii Frizti** by Frizti, **Eglantine**, **Eden**, **Sudachi** and the **yuzu** project before them.
+- **Lichii** by zortos293 and contributors: everything in Leshu 6 except the two additions.
+- **EvilOOT** (the DMA read snapshot fix) and **Frizti** (its Lichii port), and Lichii Frizti.
+- **Eglantine**, **Eden**, **Sudachi** and the **yuzu** project before them.
 - **Dynamic FPS by Dark**, bundled in Lichii.
-- Frame spacing and measurements: leshupro, with Claude (Anthropic).
+- Build 117 adaptation, frame spacing and measurements: leshupro, with Claude (Anthropic).
 
 The original Lichii README is in [README.lichii.md](README.lichii.md).
 

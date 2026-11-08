@@ -2,15 +2,27 @@
   <img src="leshu/leshu.png" alt="Leshu" width="160">
 </p>
 
-# Lichii Leshu 5
+# Lichii Leshu 6
 
 [English](README.md) · **Español**
 
-**Leshu 5** es la **build 117** de [zortos293/Lichii](https://github.com/zortos293/Lichii) (un emulador de Switch 2) con un único añadido: **espaciado de la generación de fotogramas**. Todo el código restante, los ajustes y el perfil PGO son los que publica zortos293.
+**Leshu 6** es la **build 117** de [zortos293/Lichii](https://github.com/zortos293/Lichii) (un emulador de Switch 2) con dos añadidos: **instantáneas de las lecturas DMA de macros** y **espaciado de la generación de fotogramas**. Todo el código restante, los ajustes y el perfil PGO son los que publica zortos293.
 
-> Jugando normal, sin generación de fotogramas, Leshu 5 **no es más rápida** que la build 117 oficial. Si no usas la generación de fotogramas, usa la oficial.
+## Instantáneas de las lecturas DMA (nuevo en Leshu 6)
 
-## Qué añade
+Ocarina of Time lee un dato de oclusión por cada objeto unas 40.000 veces por segundo, y cada lectura hacía que los dos hilos de GPU se esperaran. Leshu 6 se salta esa espera mientras nada enviado después haya podido cambiar esos datos. La idea es el arreglo de EvilOOT, tal como lo incorporó Frizti a Lichii Frizti; Leshu lo adapta a la build 117.
+
+El mismo programa con el arreglo apagado y encendido, portátil 720p, i7-11700F + RTX 3060:
+
+| | Apagado | **Encendido** |
+|---|---|---|
+| Aldea Kokiri, quieto | 29,6 | **32,3 (+9%)** |
+| Campo de Hyrule, quieto | 35,6 | **38,2 (+7%)** |
+| Aldea Kokiri, caminando (dos pruebas) | 28,6 / 28,7 | **40,7 / 32,6** |
+
+Caminando, los FPS varían mucho según la cámara: toma esas dos cifras como aproximadas. En modo verificación se comparó cada lectura saltada con la lectura segura: 0 diferencias en 11,5 millones de lecturas. La build 117 no tiene detector de destellos, así que los destellos blancos solo se revisaron a ojo, en una sesión de juego y en un solo PC. `EDEN_NX2_DMA_SNAPSHOT=0` en `nx2_switches.txt` lo desactiva.
+
+## Espaciado de la generación de fotogramas
 
 Con la generación activa, cada fotograma generado se presentaba justo antes del real, así que llegaban a pares. Leshu 5 los reparte por igual.
 
@@ -29,7 +41,7 @@ Para usarlo: Emulación → Configurar → Gráficos → Enable Frame Generation
 ## Instalación (Windows)
 
 1. Instala el [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) si no lo tienes.
-2. Descarga `Leshu-5-Windows-x64.zip` de [Releases](https://github.com/leshupro/Leshu/releases) y extrae la carpeta completa.
+2. Descarga `Leshu-6-Windows-x64.zip` de [Releases](https://github.com/leshupro/Leshu/releases) y extrae la carpeta completa.
 3. Pon tus propios `prod.keys` y `title.keys` en `user/keys/` e instala el firmware sacado de tu propia consola (Herramientas → Instalar firmware).
 4. Abre **lichii.exe**. Al arrancar por primera vez crea los ajustes que recomienda zortos293.
 
@@ -48,14 +60,15 @@ leshu\scripts\configure_z.bat build-z117 D:/lichii/zsrc/lichii-windows.profdata
 leshu\scripts\build_dir.bat build-z117
 ```
 
-Leshu 1-4 (basadas en Lichii Frizti v3) están en la [rama `leshu`](https://github.com/leshupro/Leshu/tree/leshu).
+Leshu 5 está en la [rama `leshu5`](https://github.com/leshupro/Leshu/tree/leshu5). Leshu 1-4 (basadas en Lichii Frizti v3) están en la [rama `leshu`](https://github.com/leshupro/Leshu/tree/leshu).
 
 ## Créditos
 
-- **Lichii**, de zortos293 y colaboradores: todo lo que hay en Leshu 5 salvo el espaciado.
-- **Lichii Frizti**, de Frizti, **Eglantine**, **Eden**, **Sudachi** y antes el proyecto **yuzu**.
+- **Lichii**, de zortos293 y colaboradores: todo lo que hay en Leshu 6 salvo los dos añadidos.
+- **EvilOOT** (el arreglo de las lecturas DMA) y **Frizti** (su incorporación a Lichii), y Lichii Frizti.
+- **Eglantine**, **Eden**, **Sudachi** y antes el proyecto **yuzu**.
 - **Dynamic FPS by Dark**, incluido en Lichii.
-- Espaciado y mediciones: leshupro, con Claude (Anthropic).
+- Adaptación a la build 117, espaciado y mediciones: leshupro, con Claude (Anthropic).
 
 El README original de Lichii está en [README.lichii.md](README.lichii.md).
 
