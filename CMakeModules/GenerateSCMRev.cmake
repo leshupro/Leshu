@@ -14,7 +14,17 @@ endfunction()
 
 get_timestamp(BUILD_DATE)
 
-if (LICHII_BUILD_TAG MATCHES "^build-[0-9]+$")
+# Leshu: dist/leshu_version.txt holds the release number of this performance build.
+set(LESHU_VERSION_FILE "${CMAKE_SOURCE_DIR}/dist/leshu_version.txt")
+if (EXISTS "${LESHU_VERSION_FILE}")
+    file(STRINGS "${LESHU_VERSION_FILE}" LESHU_VERSION LIMIT_COUNT 1 REGEX "^[0-9]+$")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${LESHU_VERSION_FILE}")
+endif()
+
+if (LESHU_VERSION)
+    set(BUILD_VERSION "Leshu ${LESHU_VERSION} (build-117)")
+    set(IS_DEV_BUILD false)
+elseif (LICHII_BUILD_TAG MATCHES "^build-[0-9]+$")
     set(BUILD_VERSION "${LICHII_BUILD_TAG}")
     set(IS_DEV_BUILD false)
 elseif (DEFINED GIT_RELEASE)
