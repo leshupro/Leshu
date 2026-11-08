@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Leshu</title>
+  <defs>
+    <radialGradient id="outer" cx="50%" cy="70%" r="65%">
+      <stop offset="0" stop-color="#9be36a"/>
+      <stop offset="1" stop-color="#3f9a34"/>
+    </radialGradient>
+    <radialGradient id="inner" cx="50%" cy="60%" r="60%">
+      <stop offset="0" stop-color="#e6ffb8"/>
+      <stop offset="1" stop-color="#8fd85c"/>
+    </radialGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6a8"/>
+      <stop offset="1" stop-color="#ffc21a"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#1d2b22"/>
+  <!-- outer ruffled leaves -->
+  <path d="M128 222 C80 222 44 196 40 156 C36 128 48 106 62 96 C58 76 74 58 92 62
+           C100 44 120 38 134 48 C148 38 170 44 176 62 C196 58 210 78 204 98
+           C220 110 226 134 218 160 C208 198 174 222 128 222 Z" fill="url(#outer)"/>
+  <!-- inner heart -->
+  <path d="M128 206 C96 206 72 186 70 156 C68 132 80 114 94 108 C96 92 112 82 128 90
+           C144 82 160 92 162 108 C176 114 188 132 186 156 C184 186 160 206 128 206 Z" fill="url(#inner)"/>
+  <!-- leaf veins -->
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round">
+    <path d="M128 204 L128 112"/>
+    <path d="M128 176 Q108 166 96 146"/>
+    <path d="M128 176 Q148 166 160 146"/>
+    <path d="M128 150 Q112 140 104 124"/>
+    <path d="M128 150 Q144 140 152 124"/>
+  </g>
+  <!-- speed bolt -->
+  <path d="M140 96 L106 154 L130 154 L116 204 L162 134 L136 134 L152 96 Z" fill="url(#bolt)" stroke="#7a5a00" stroke-width="3" stroke-linejoin="round"/>
+</svg>
