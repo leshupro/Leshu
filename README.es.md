@@ -18,21 +18,21 @@
 
 - **Leshu 4**: los fotogramas generados se espacian. Con la generación de fotogramas activa, cada fotograma generado se presentaba justo antes del real: a 30 FPS ×2 en un monitor de 180 Hz se veían 1 y 5 refrescos, así que 60 fotogramas por segundo seguían moviéndose como 30. Ahora ~89-90% se ven exactamente 3 refrescos (16,7 ms). Solo actúa con la generación de fotogramas (`EDEN_NX2_FG_PACE=0` lo desactiva); jugar normal no cambia. Consejo para PCs modestos: botón de 30 FPS de Ocarina + Emulación → Configurar → Gráficos → Enable Frame Generation (FSR3, ×2).
 - **Leshu 3**: Leshu 2 más arreglos que publicaron los autores el 7-11-2026: el modo 30 FPS de baja latencia de Frizti (a 30 FPS los fotogramas ya no esperan ~30 ms antes de mostrarse: un fotograma menos de retraso en los controles) y tres arreglos de zortos293/Lichii (un cierre en Windows al liberar páginas de la tabla de páginas, estadísticas de depuración de la caché de texturas que crecían toda la sesión y búferes reunidos que no se liberaban). Misma velocidad que Leshu 2 en nuestras pruebas; el modo 30 FPS se mantiene en 30,0 en `lichii.exe`.
-- **Leshu 2**: perfil PGO grabado jugando (Dock, caminando): +7-11% caminando frente a Leshu 1.
+- **Leshu 2**: perfil PGO grabado jugando (Dock, caminando): cerca de +5-7% caminando frente a Leshu 1.
 - **Leshu 1**: primera versión (Frizti v3 + clang ThinLTO PGO).
 
 ## Resultados
 
 Modo Dock, 1080p, i7-11700F + RTX 3060, FPS medio durante 96 s después de cargar la partida.
 
-**Leshu 2 contra Leshu 1** (`eden-cli`, dos pruebas de cada; "caminando" = Link camina en cuadrado y gira la cámara):
+**Leshu 2 contra Leshu 1** (`eden-cli`, dos pruebas de cada, Hyrule caminando una pareja limpia: una primera pareja se descartó porque la prueba de Leshu 1 tuvo muchos tirones e inflaba la mejora a +11%; "caminando" = Link camina en cuadrado y gira la cámara):
 
 | Zona | Leshu 1 | **Leshu 2** |
 |---|---|---|
 | Aldea Kokiri, quieto | 33,6 | **34,2** |
 | Aldea Kokiri, caminando | 39,9 | **42,9 (+7%)** |
 | Campo de Hyrule, quieto | 40,1 | 39,9 |
-| Campo de Hyrule, caminando | 37,1 | **41,3 (+11%)** |
+| Campo de Hyrule, caminando | 41,4 | **43,4 (+5%)** |
 
 **Leshu 1 contra la versión oficial de Frizti v3** (`lichii.exe`, Link quieto):
 

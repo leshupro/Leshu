@@ -18,21 +18,21 @@
 
 - **Leshu 4**: generated frames are paced. With frame generation on, a generated frame used to be presented right before its real one: at 30 FPS x2 on a 180 Hz display they showed for 1 and 5 refreshes, so 60 frames a second still moved like 30. Now ~89-90% show for exactly 3 refreshes (16.7 ms). Only active with frame generation (`EDEN_NX2_FG_PACE=0` turns it off); normal play is unchanged. Tip for weaker PCs: Ocarina's 30 FPS button + Emulation → Configure → Graphics → Enable Frame Generation (FSR3, x2).
 - **Leshu 3**: Leshu 2 plus fixes the authors published on 2026-11-07: Frizti's low-latency 30 FPS mode (frames no longer wait ~30 ms before being shown at 30 FPS: about one frame less input lag) and three zortos293/Lichii fixes (a Windows crash when page-table pages were decommitted, texture cache debug statistics that grew for the whole session, gathered buffers not released). Same speed as Leshu 2 in our runs; 30 FPS mode holds 30.0 in `lichii.exe`.
-- **Leshu 2**: PGO profile trained on gameplay (Docked, walking): +7-11% while walking vs Leshu 1.
+- **Leshu 2**: PGO profile trained on gameplay (Docked, walking): about +5-7% while walking vs Leshu 1.
 - **Leshu 1**: first build (Frizti v3 + clang ThinLTO PGO).
 
 ## Results
 
 Docked mode, 1080p, i7-11700F + RTX 3060, mean FPS over 96 s after the save loads.
 
-**Leshu 2 vs Leshu 1** (`eden-cli`, two runs each; "walking" = Link walks a square and turns the camera):
+**Leshu 2 vs Leshu 1** (`eden-cli`, two runs each, Hyrule walking one clean pair: a first pair was dropped because the Leshu 1 run had heavy stutter and inflated the gain to +11%; "walking" = Link walks a square and turns the camera):
 
 | Area | Leshu 1 | **Leshu 2** |
 |---|---|---|
 | Kokiri Village, standing | 33.6 | **34.2** |
 | Kokiri Village, walking | 39.9 | **42.9 (+7%)** |
 | Hyrule Field, standing | 40.1 | 39.9 |
-| Hyrule Field, walking | 37.1 | **41.3 (+11%)** |
+| Hyrule Field, walking | 41.4 | **43.4 (+5%)** |
 
 **Leshu 1 vs the official Frizti v3 build** (`lichii.exe`, Link standing still):
 
