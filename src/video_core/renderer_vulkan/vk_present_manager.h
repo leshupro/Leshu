@@ -6,7 +6,9 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <boost/container/deque.hpp>
@@ -38,6 +40,8 @@ struct Frame {
     vk::Semaphore render_ready;
     vk::Fence present_done;
     bool storage_capable{};
+    /// When the renderer queued the frame for presentation (frame generation pacing).
+    std::chrono::steady_clock::time_point queued_at{};
 };
 
 class PresentManager {
@@ -85,6 +89,10 @@ private:
 
     void SetImageCount();
 
+    /// Leshu: with frame generation, spaces presents by the mean arrival interval so a generated
+    /// frame and its real one are not shown back to back (EDEN_NX2_FG_PACE=0 turns it off).
+    void PaceGenerated(Frame* frame, std::stop_token token);
+
 private:
     const vk::Instance& instance;
     Core::Frontend::EmuWindow& render_window;
@@ -108,6 +116,14 @@ private:
     bool use_present_thread;
     std::atomic<std::size_t> image_count{};
     std::atomic<std::size_t> swapchain_image_count{};
+    double fg_arrival_ns{};
+    std::chrono::steady_clock::time_point fg_last_arrival{};
+    std::chrono::steady_clock::time_point fg_last_present{};
+    std::chrono::steady_clock::time_point fg_last_report{};
+    std::array<u32, 6> fg_buckets{};
+    u64 fg_presents{};
+    double fg_interval_sum_ms{};
+    double fg_interval_max_ms{};
     std::atomic<VkFormat> swapchain_image_format{};
 };
 

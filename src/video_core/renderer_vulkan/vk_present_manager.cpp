@@ -4,6 +4,11 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <cstdlib>
+#include <thread>
+
+#include "common/logging.h"
 #include "common/settings.h"
 #include "common/thread.h"
 #include "core/frontend/emu_window.h"
@@ -189,6 +194,7 @@ Frame* PresentManager::GetRenderFrame() {
 void PresentManager::Present(Frame* frame) {
     if (use_present_thread) {
         scheduler.Record([this, frame](vk::CommandBuffer) {
+            frame->queued_at = std::chrono::steady_clock::now();
             std::unique_lock lock{queue_mutex};
             present_queue.push_back(frame);
             frame_cv.notify_one();
@@ -345,6 +351,7 @@ void PresentManager::PresentThread(std::stop_token token) {
             // before the queue lock goes out of scope. This way the swapchain
             // lock in WaitPresent is guaranteed to occur after here.
             void(std::exchange(lock, std::unique_lock{swapchain_mutex}));
+            PaceGenerated(frame, token);
             CopyToSwapchain(frame);
 
             // Free the frame for reuse
@@ -352,6 +359,73 @@ void PresentManager::PresentThread(std::stop_token token) {
             free_queue.push_back(frame);
             free_cv.notify_one();
         }
+    }
+}
+
+void PresentManager::PaceGenerated(Frame* frame, std::stop_token token) {
+    using Clock = std::chrono::steady_clock;
+    // A generated frame is queued right before its real one. Without spacing, at 30 FPS x2 on a
+    // 180 Hz display one showed for 1 refresh and the other for 5: 60 frames a second that still
+    // moved like 30 (measured on Lichii Frizti; same present path here).
+    static const bool enabled = [] {
+        const char* const value = std::getenv("EDEN_NX2_FG_PACE");
+        return value == nullptr || value[0] != '0';
+    }();
+    if (!Settings::values.frame_gen.GetValue()) {
+        fg_last_arrival = {};
+        fg_last_present = {};
+        fg_arrival_ns = 0.0;
+        return;
+    }
+    const Clock::time_point arrival =
+        frame->queued_at != Clock::time_point{} ? frame->queued_at : Clock::now();
+    if (fg_last_arrival != Clock::time_point{}) {
+        const double sample = std::clamp(
+            static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(arrival - fg_last_arrival)
+                    .count()),
+            0.0, 100e6);
+        fg_arrival_ns += (sample - fg_arrival_ns) * 0.05;
+    }
+    fg_last_arrival = arrival;
+    if (enabled && fg_last_present != Clock::time_point{} && fg_arrival_ns > 2e6) {
+        // 90% of the mean interval: a late frame is not held, an early one waits for its slot.
+        const auto spacing = std::chrono::nanoseconds{
+            static_cast<long long>((std::min)(fg_arrival_ns * 0.9, 50e6))};
+        const auto target = fg_last_present + spacing;
+        for (auto now = Clock::now(); now < target && !token.stop_requested(); now = Clock::now()) {
+            const auto left = target - now;
+            if (left > std::chrono::microseconds{1500}) {
+                std::this_thread::sleep_for(left - std::chrono::microseconds{1000});
+            } else {
+                std::this_thread::yield();
+            }
+        }
+    }
+    const Clock::time_point now = Clock::now();
+    if (fg_last_present != Clock::time_point{}) {
+        const double ms = std::chrono::duration<double, std::milli>(now - fg_last_present).count();
+        const size_t bucket = ms < 4 ? 0 : ms < 8 ? 1 : ms < 12 ? 2 : ms < 20 ? 3 : ms < 30 ? 4 : 5;
+        ++fg_buckets[bucket];
+        ++fg_presents;
+        fg_interval_sum_ms += ms;
+        fg_interval_max_ms = (std::max)(fg_interval_max_ms, ms);
+    }
+    fg_last_present = now;
+    if (fg_last_report == Clock::time_point{}) {
+        fg_last_report = now;
+    } else if (now - fg_last_report >= std::chrono::seconds{10} && fg_presents != 0) {
+        LOG_INFO(Render_Vulkan,
+                 "Frame generation pacing ({}): {} presents, interval ms <4/4-8/8-12/12-20/20-30/30+: "
+                 "{}/{}/{}/{}/{}/{}, mean {:.2f}, max {:.2f}, spacing {:.2f} ms",
+                 enabled ? "on" : "off", fg_presents, fg_buckets[0], fg_buckets[1], fg_buckets[2], fg_buckets[3],
+                 fg_buckets[4], fg_buckets[5], fg_interval_sum_ms / fg_presents,
+                 fg_interval_max_ms, fg_arrival_ns * 0.9e-6);
+        fg_buckets = {};
+        fg_presents = 0;
+        fg_interval_sum_ms = 0.0;
+        fg_interval_max_ms = 0.0;
+        fg_last_report = now;
     }
 }
 
